@@ -2,9 +2,7 @@
 
 // Import necessary libraries
 const express = require('express');
-// Use puppeteer-core, a lightweight version of Puppeteer
 const puppeteer = require('puppeteer-core');
-// Use a chromium binary specifically designed for serverless environments
 const chromium = require('@sparticuz/chromium');
 const cors = require('cors');
 
@@ -20,7 +18,8 @@ const baseApiUrl = 'https://ssr-system.ct.ws';
 
 /**
  * Dynamically relays an API request using Puppeteer to bypass browser checks.
- * @param {string} path - The API endpoint path (e.g., 'menuitems', 'users/1').
+ * This version includes special handling for POST requests to include CSRF tokens.
+ * @param {string} path - The API endpoint path (e.g., 'menuitems', 'admin/login').
  * @param {string} method - The HTTP method (GET, POST, PUT, DELETE).
  * @param {object} body - The JSON request body for POST/PUT requests.
  * @returns {object} An object containing the status and data from the target API.
@@ -29,9 +28,6 @@ async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
-        // --- ROBUST RENDER DEPLOYMENT FIX ---
-        // Launch Puppeteer using the chromium binary from @sparticuz/chromium
-        // This automatically handles the executable path and arguments.
         browser = await puppeteer.launch({
             args: chromium.args,
             executablePath: await chromium.executablePath(),
@@ -44,6 +40,29 @@ async function relayRequestWithPuppeteer(path, method, body) {
         console.log('Navigating to base URL to solve security challenge...');
         await page.goto(baseApiUrl, { waitUntil: 'networkidle0' });
         console.log('Security challenge passed, cookie should be set.');
+
+        // --- NEW CSRF TOKEN HANDLING FOR POST REQUESTS ---
+        if (method === 'POST') {
+            console.log('POST request detected. Attempting to fetch CSRF token...');
+            // Go to the page that contains the form to get a fresh CSRF token.
+            // We assume the form is on a page with the same name as the API endpoint.
+            // e.g., for a POST to '/api/admin/login', we visit '/admin/login'
+            const formPageUrl = `${baseApiUrl}/${path.replace(/^api\//, '')}`;
+            await page.goto(formPageUrl, { waitUntil: 'networkidle0' });
+
+            const csrfToken = await page.evaluate(() => {
+                const tokenElement = document.querySelector('input[name="_token"]');
+                return tokenElement ? tokenElement.value : null;
+            });
+
+            if (csrfToken) {
+                console.log('CSRF Token found:', csrfToken);
+                // Add the token to the body of the request
+                body._token = csrfToken;
+            } else {
+                console.log('Warning: CSRF token input field not found on page.');
+            }
+        }
 
         // STEP 2: Execute the actual API request from within the browser's context.
         const targetUrl = `${baseApiUrl}/api/${path}`;
@@ -74,7 +93,9 @@ async function relayRequestWithPuppeteer(path, method, body) {
 
                 return {
                     status: apiResponse.status,
-                    data: responseData
+                    data: responseData,
+                    // Also return headers to check for cookies or redirects if needed later
+                    headers: Object.fromEntries(apiResponse.headers.entries())
                 };
             } catch (error) {
                 return { status: 500, data: { message: error.message } };
