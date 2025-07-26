@@ -2,7 +2,10 @@
 
 // Import necessary libraries
 const express = require('express');
-const puppeteer = require('puppeteer');
+// Use puppeteer-core, a lightweight version of Puppeteer
+const puppeteer = require('puppeteer-core');
+// Use a chromium binary specifically designed for serverless environments
+const chromium = require('@sparticuz/chromium');
 const cors = require('cors');
 
 const app = express();
@@ -26,13 +29,13 @@ async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
-        // --- RENDER DEPLOYMENT FIX ---
-        // Explicitly tell Puppeteer where to find the Chrome executable.
-        // The path is set via an environment variable in the Render dashboard.
-        const browser = await puppeteer.launch({
-            headless: "new",
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        // --- ROBUST RENDER DEPLOYMENT FIX ---
+        // Launch Puppeteer using the chromium binary from @sparticuz/chromium
+        // This automatically handles the executable path and arguments.
+        browser = await puppeteer.launch({
+            args: chromium.args,
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
         });
         
         const page = await browser.newPage();
