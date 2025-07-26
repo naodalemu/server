@@ -37,22 +37,30 @@ async function relayRequestWithPuppeteer(path, method, body) {
         const page = await browser.newPage();
 
         // STEP 1: Navigate to the base URL to solve the security challenge.
+        // This single navigation is now used to get the CSRF token for all POST requests.
         console.log('Navigating to base URL to solve security challenge...');
         await page.goto(baseApiUrl, { waitUntil: 'networkidle0' });
         console.log('Security challenge passed, cookie should be set.');
 
-        // --- NEW CSRF TOKEN HANDLING FOR POST REQUESTS ---
+        // --- IMPROVED CSRF TOKEN HANDLING FOR POST REQUESTS ---
         if (method === 'POST') {
-            console.log('POST request detected. Attempting to fetch CSRF token...');
-            // Go to the page that contains the form to get a fresh CSRF token.
-            // We assume the form is on a page with the same name as the API endpoint.
-            // e.g., for a POST to '/api/admin/login', we visit '/admin/login'
-            const formPageUrl = `${baseApiUrl}/${path.replace(/^api\//, '')}`;
-            await page.goto(formPageUrl, { waitUntil: 'networkidle0' });
-
+            console.log('POST request detected. Attempting to fetch CSRF token from the page...');
+            
+            // The page is already loaded from Step 1. We now scrape the token from it.
             const csrfToken = await page.evaluate(() => {
-                const tokenElement = document.querySelector('input[name="_token"]');
-                return tokenElement ? tokenElement.value : null;
+                // Strategy 1: Look for the CSRF token in a meta tag (standard Laravel practice).
+                const metaToken = document.querySelector('meta[name="csrf-token"]');
+                if (metaToken) {
+                    return metaToken.getAttribute('content');
+                }
+
+                // Strategy 2: Fallback to looking for a hidden input field (for login forms, etc.).
+                const inputToken = document.querySelector('input[name="_token"]');
+                if (inputToken) {
+                    return inputToken.value;
+                }
+
+                return null; // Return null if no token is found
             });
 
             if (csrfToken) {
@@ -60,7 +68,8 @@ async function relayRequestWithPuppeteer(path, method, body) {
                 // Add the token to the body of the request
                 body._token = csrfToken;
             } else {
-                console.log('Warning: CSRF token input field not found on page.');
+                // This is a critical warning. If no token is found, the request will likely fail.
+                console.log('CRITICAL WARNING: No CSRF token found on the page. The POST request will likely be rejected.');
             }
         }
 
