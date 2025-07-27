@@ -8,11 +8,17 @@ async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
-        // This launch configuration is the most robust for Vercel.
-        // It explicitly calls chromium.executablePath to ensure the browser
-        // is downloaded to a temporary directory if it's not already there.
+        // This is the most robust launch configuration for Vercel.
+        // It includes the --no-sandbox flag and other arguments required
+        // to run in a restricted serverless environment.
         browser = await puppeteer.launch({
-            args: chromium.args,
+            args: [
+                ...chromium.args,
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--single-process'
+            ],
             defaultViewport: chromium.defaultViewport,
             executablePath: await chromium.executablePath(),
             headless: chromium.headless,
