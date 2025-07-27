@@ -2,16 +2,15 @@
 
 // Import necessary libraries
 const express = require('express');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // --- Middleware ---
-// 1. Enable CORS to allow requests from your frontend.
 app.use(cors());
-// 2. Enable Express to parse JSON request bodies.
 app.use(express.json());
 
 // The base URL of your API hosted on InfinityFree
@@ -19,7 +18,8 @@ const baseApiUrl = 'https://ssr-system.ct.ws';
 
 /**
  * Dynamically relays an API request using Puppeteer to bypass browser checks.
- * @param {string} path - The API endpoint path (e.g., 'menuitems', 'users/1').
+ * This version includes special handling for POST requests to include CSRF tokens.
+ * @param {string} path - The API endpoint path (e.g., 'menuitems', 'admin/login').
  * @param {string} method - The HTTP method (GET, POST, PUT, DELETE).
  * @param {object} body - The JSON request body for POST/PUT requests.
  * @returns {object} An object containing the status and data from the target API.
@@ -28,29 +28,55 @@ async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
-        // Launch a headless browser.
-        // The --no-sandbox argument is often needed on hosting platforms.
         browser = await puppeteer.launch({
-            headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            args: chromium.args,
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
         });
         
         const page = await browser.newPage();
 
-        // STEP 1: Navigate to a simple page on the target domain.
-        // This action triggers and solves the JavaScript security challenge,
-        // which sets a necessary cookie in the browser instance for subsequent requests.
+        // STEP 1: Navigate to the base URL to solve the security challenge.
+        // This single navigation is now used to get the CSRF token for all POST requests.
         console.log('Navigating to base URL to solve security challenge...');
         await page.goto(baseApiUrl, { waitUntil: 'networkidle0' });
         console.log('Security challenge passed, cookie should be set.');
 
-        // STEP 2: With the security cookie now present in the browser,
-        // execute the *actual* API request from within the browser's context using fetch().
-        // This makes the request appear legitimate to the server.
+        // --- IMPROVED CSRF TOKEN HANDLING FOR POST REQUESTS ---
+        if (method === 'POST') {
+            console.log('POST request detected. Attempting to fetch CSRF token from the page...');
+            
+            // The page is already loaded from Step 1. We now scrape the token from it.
+            const csrfToken = await page.evaluate(() => {
+                // Strategy 1: Look for the CSRF token in a meta tag (standard Laravel practice).
+                const metaToken = document.querySelector('meta[name="csrf-token"]');
+                if (metaToken) {
+                    return metaToken.getAttribute('content');
+                }
+
+                // Strategy 2: Fallback to looking for a hidden input field (for login forms, etc.).
+                const inputToken = document.querySelector('input[name="_token"]');
+                if (inputToken) {
+                    return inputToken.value;
+                }
+
+                return null; // Return null if no token is found
+            });
+
+            if (csrfToken) {
+                console.log('CSRF Token found:', csrfToken);
+                // Add the token to the body of the request
+                body._token = csrfToken;
+            } else {
+                // This is a critical warning. If no token is found, the request will likely fail.
+                console.log('CRITICAL WARNING: No CSRF token found on the page. The POST request will likely be rejected.');
+            }
+        }
+
+        // STEP 2: Execute the actual API request from within the browser's context.
         const targetUrl = `${baseApiUrl}/api/${path}`;
         
         const response = await page.evaluate(async (url, method, body) => {
-            // This block of code runs INSIDE the Puppeteer-controlled browser
             try {
                 const requestOptions = {
                     method: method,
@@ -60,7 +86,6 @@ async function relayRequestWithPuppeteer(path, method, body) {
                     }
                 };
 
-                // Only attach a body for relevant methods if a body exists
                 if (body && Object.keys(body).length > 0 && ['POST', 'PUT', 'PATCH'].includes(method)) {
                     requestOptions.body = JSON.stringify(body);
                 }
@@ -70,16 +95,16 @@ async function relayRequestWithPuppeteer(path, method, body) {
                 
                 let responseData;
                 try {
-                    // Assume the response is JSON, try to parse it
                     responseData = JSON.parse(responseText);
                 } catch (e) {
-                    // If parsing fails, the response was likely plain text or HTML
                     responseData = responseText;
                 }
 
                 return {
                     status: apiResponse.status,
-                    data: responseData
+                    data: responseData,
+                    // Also return headers to check for cookies or redirects if needed later
+                    headers: Object.fromEntries(apiResponse.headers.entries())
                 };
             } catch (error) {
                 return { status: 500, data: { message: error.message } };
@@ -91,7 +116,7 @@ async function relayRequestWithPuppeteer(path, method, body) {
 
     } catch (error) {
         console.error('An error occurred during the Puppeteer relay operation:', error);
-        return { status: 502, data: { error: true, message: `Proxy error: ${error.message}` } }; // 502 Bad Gateway
+        return { status: 502, data: { error: true, message: `Proxy error: ${error.message}` } };
     } finally {
         if (browser) {
             await browser.close();
@@ -101,15 +126,9 @@ async function relayRequestWithPuppeteer(path, method, body) {
 }
 
 // --- Dynamic Catch-All API Route ---
-// This route will catch any request made to /api/...
 app.all('/api/*', async (req, res) => {
-    // Extract the dynamic path part after '/api/'
-    // For a request to '/api/users/1', req.params[0] will be 'users/1'
     const path = req.params[0];
-    
     const result = await relayRequestWithPuppeteer(path, req.method, req.body);
-    
-    // Forward the status and JSON data from the relayed request back to the original client
     res.status(result.status).json(result.data);
 });
 
