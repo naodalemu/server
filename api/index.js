@@ -23,12 +23,14 @@ async function runCorsMiddleware(req, res) {
 async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`[Proxy] Initiating relay: ${method} to /api/${path}`);
     let browser = null;
+    const stateChangingMethods = ['POST', 'PUT', 'DELETE', 'PATCH'];
+
     try {
         // STEP 1: Launch the browser with robust settings for serverless environments
         console.log('[Proxy] Launching Chromium browser...');
         browser = await puppeteer.launch({
             args: [
-                ...chromium.args,
+              ...chromium.args,
                 '--no-sandbox', // A required flag for running in many serverless/containerized environments
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage', // Overcomes resource limits in some environments
@@ -61,21 +63,21 @@ async function relayRequestWithPuppeteer(path, method, body) {
 
         // Log cookies to verify that the Laravel session has been established.
         const cookies = await page.cookies();
-        console.log('[Proxy] Cookies found after navigation:', JSON.stringify(cookies.map(c => ({ name: c.name, domain: c.domain, httpOnly: c.httpOnly })), null, 2));
+        console.log('[Proxy] Cookies found after navigation:', JSON.stringify(cookies.map(c => ({name: c.name, domain: c.domain, httpOnly: c.httpOnly})), null, 2));
         if (!cookies.some(c => c.name.includes('session'))) {
             console.warn('[Proxy] WARNING: A session-like cookie was not found. CSRF/Auth may fail.');
         }
 
         let csrfToken = null;
         // Only attempt to scrape a CSRF token for methods that require it.
-        if (includes(method)) {
+        if (stateChangingMethods.includes(method)) {
             console.log(`[Proxy] ${method} request detected. Attempting to fetch CSRF token...`);
             try {
                 // STEP 3: Reliably scrape the CSRF token using an explicit wait, not a fixed timeout.
                 await page.waitForSelector('meta[name="csrf-token"]', { timeout: 7000 });
                 csrfToken = await page.evaluate(() => {
                     const meta = document.querySelector('meta[name="csrf-token"]');
-                    return meta ? meta.getAttribute('content') : null;
+                    return meta? meta.getAttribute('content') : null;
                 });
 
                 if (csrfToken) {
@@ -96,7 +98,7 @@ async function relayRequestWithPuppeteer(path, method, body) {
         const targetUrl = `${baseApiUrl}/api/${path}`;
         console.log(`[Proxy] Executing sandboxed fetch to: ${targetUrl}`);
 
-        const response = await page.evaluate(async (url, method, body, token) => {
+        const response = await page.evaluate(async (url, method, body, token, stateChangingMethods) => {
             try {
                 const headers = {
                     'Content-Type': 'application/json',
@@ -114,7 +116,7 @@ async function relayRequestWithPuppeteer(path, method, body) {
                     headers: headers,
                 };
 
-                if (body && Object.keys(body).length > 0 && includes(method)) {
+                if (body && Object.keys(body).length > 0 && stateChangingMethods.includes(method)) {
                     requestOptions.body = JSON.stringify(body);
                 }
 
@@ -133,7 +135,7 @@ async function relayRequestWithPuppeteer(path, method, body) {
                 // This captures errors within the fetch call itself (e.g., network issues inside the sandbox).
                 return { status: 500, data: { message: `page.evaluate() fetch failed: ${error.message}` } };
             }
-        }, targetUrl, method, body, csrfToken);
+        }, targetUrl, method, body, csrfToken, stateChangingMethods);
 
         console.log(`[Proxy] Relay completed with backend status: ${response.status}`);
         return response;
