@@ -1,16 +1,30 @@
-// api/index.js
+import puppeteer from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
+import cors from 'cors';
 
-const puppeteer = require('puppeteer-core');
-// Using the full chromium package for stability.
-const chromium = require('@sparticuz/chromium');
+// Initialize cors middleware
+const corsMiddleware = cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+});
+
+async function runCorsMiddleware(req, res) {
+    return new Promise((resolve, reject) => {
+        corsMiddleware(req, res, (result) => {
+            if (result instanceof Error) {
+                return reject(result);
+            }
+            return resolve(result);
+        });
+    });
+}
+
 
 async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
-        // This is the most robust launch configuration for Vercel.
-        // It includes the --no-sandbox flag and other arguments required
-        // to run in a restricted serverless environment.
         browser = await puppeteer.launch({
             args: [
                 ...chromium.args,
@@ -30,8 +44,9 @@ async function relayRequestWithPuppeteer(path, method, body) {
 
         console.log('Navigating to base URL to solve security challenge...');
         
-        await page.goto(baseApiUrl);
-        await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
+        // Give the page up to 60 seconds to load to prevent timeouts
+        await page.goto(baseApiUrl, { timeout: 60000 });
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds for scripts
 
         console.log('Security challenge passed, cookie should be set.');
 
@@ -88,16 +103,13 @@ async function relayRequestWithPuppeteer(path, method, body) {
 }
 
 export default async function handler(req, res) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    await runCorsMiddleware(req, res);
 
     if (req.method === 'OPTIONS') {
-        res.status(200).end();
+        res.status(204).end();
         return;
     }
     
-    // Extract the path from the request URL, removing the leading '/api/'
     const path = req.url.startsWith('/api/') ? req.url.substring(5) : req.url.substring(1);
     const body = req.body;
     
