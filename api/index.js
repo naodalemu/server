@@ -8,23 +8,19 @@ async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
-        // The .puppeteerrc.cjs file handles all the configuration.
+        // The new .puppeteerrc.cjs file handles all the configuration.
+        // We can now use a much simpler launch command.
         browser = await puppeteer.launch({
             args: chromium.args,
             executablePath: await chromium.executablePath(),
             headless: chromium.headless,
         });
-        
+
         const page = await browser.newPage();
         const baseApiUrl = 'https://ssr-system.ct.ws';
 
         console.log('Navigating to base URL to solve security challenge...');
-        
-        // Using a fixed delay instead of waiting for a specific event.
-        // This can be more reliable if the page has unusual loading behavior.
-        await page.goto(baseApiUrl);
-        await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
-
+        await page.goto(baseApiUrl, { waitUntil: 'networkidle0' });
         console.log('Security challenge passed, cookie should be set.');
 
         if (method === 'POST') {
@@ -91,8 +87,8 @@ export default async function handler(req, res) {
 
     const path = req.url.substring(1);
     const body = req.body;
-    
+
     const result = await relayRequestWithPuppeteer(path, req.method, body);
-    
+
     res.status(result.status).json(result.data);
 }
