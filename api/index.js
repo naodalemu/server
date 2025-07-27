@@ -20,7 +20,7 @@ async function runCorsMiddleware(req, res) {
     });
 }
 
-async function relayRequestWithPuppeteer(path, method, body) {
+async function relayRequestWithPuppeteer(path, method, body, headers) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
@@ -32,46 +32,39 @@ async function relayRequestWithPuppeteer(path, method, body) {
             headless: chromium.headless,
             ignoreHTTPSErrors: true,
         });
-        
+
         const page = await browser.newPage();
         const baseApiUrl = 'https://ssr-system.ct.ws';
 
         console.log('Navigating to base URL to solve security challenge...');
-        
+
         // Give the page up to 60 seconds to load to prevent timeouts
-        await page.goto(baseApiUrl, { timeout: 60000 });
-        // Wait for a few seconds to ensure any client-side scripts have run
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await page.goto(baseApiUrl, { waitUntil: 'networkidle0', timeout: 15000 });
 
         console.log('Security challenge passed, cookie should be set.');
 
-        if (method === 'POST') {
-            console.log('POST request detected. Attempting to fetch CSRF token...');
-            const csrfToken = await page.evaluate(() => {
-                const metaToken = document.querySelector('meta[name="csrf-token"]');
-                if (metaToken) return metaToken.getAttribute('content');
-                const inputToken = document.querySelector('input[name="_token"]');
-                if (inputToken) return inputToken.value;
-                return null;
-            });
-            if (csrfToken) {
-                console.log('CSRF Token found:', csrfToken);
-                body._token = csrfToken;
-            } else {
-                console.log('WARNING: No CSRF token found on the page.');
-            }
-        }
-
         const targetUrl = `${baseApiUrl}/api/${path}`;
-        const response = await page.evaluate(async (url, method, body) => {
+        const response = await page.evaluate(async (url, method, body, authorizationHeader) => {
             try {
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                };
+
+                if (authorizationHeader) {
+                    requestOptions.headers['Authorization'] = authorizationHeader;
+                }
+
                 const requestOptions = {
                     method: method,
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+                    headers: headers,
                 };
+
                 if (body && Object.keys(body).length > 0 && ['POST', 'PUT', 'PATCH'].includes(method)) {
                     requestOptions.body = JSON.stringify(body);
                 }
+
                 const apiResponse = await fetch(url, requestOptions);
                 const responseText = await apiResponse.text();
                 let responseData;
@@ -84,7 +77,7 @@ async function relayRequestWithPuppeteer(path, method, body) {
             } catch (error) {
                 return { status: 500, data: { message: error.message } };
             }
-        }, targetUrl, method, body);
+        }, targetUrl, method, body, headers.authorization);
 
         console.log(`Relay successful with status: ${response.status}`);
         return response;
@@ -104,11 +97,11 @@ export default async function handler(req, res) {
         res.status(204).end();
         return;
     }
-    
+
     const path = req.url.startsWith('/api/') ? req.url.substring(5) : req.url.substring(1);
     const body = req.body;
-    
-    const result = await relayRequestWithPuppeteer(path, req.method, body);
-    
+
+    const result = await relayRequestWithPuppeteer(path, req.method, body, req.headers);
+
     res.status(result.status).json(result.data);
 }
