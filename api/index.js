@@ -39,7 +39,9 @@ async function relayRequestWithPuppeteer(path, method, body, headers) {
         console.log('Navigating to base URL to solve security challenge...');
 
         // Give the page up to 60 seconds to load to prevent timeouts
-        await page.goto(baseApiUrl, { waitUntil: 'networkidle0', timeout: 15000 });
+        await page.goto(baseApiUrl, { timeout: 60000 });
+        // Wait for a few seconds to ensure any client-side scripts have run
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
         console.log('Security challenge passed, cookie should be set.');
 
