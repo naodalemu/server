@@ -5,14 +5,15 @@
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
 
-// --- Main Puppeteer Logic (this function is unchanged) ---
+// --- Main Puppeteer Logic ---
 async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
+        // Correctly launch Puppeteer without the extra object argument
         browser = await puppeteer.launch({
             args: chromium.args,
-            executablePath: await chromium.executablePath({ revision: '119.0.2' }),
+            executablePath: await chromium.executablePath(), // <-- FIX IS HERE
             headless: chromium.headless,
         });
         
