@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer-core';
-import chromium from 'chrome-aws-lambda';
+import chromium from '@sparticuz/chromium';
 import cors from 'cors';
 
 // Initialize cors middleware
@@ -24,11 +24,10 @@ async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
-        // Launch configuration for chrome-aws-lambda
+        // The .puppeteerrc.cjs file will now automatically configure the executablePath.
         browser = await puppeteer.launch({
             args: chromium.args,
             defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath, // Note: property, not function call
             headless: chromium.headless,
             ignoreHTTPSErrors: true,
         });
