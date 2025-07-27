@@ -20,7 +20,9 @@ async function relayRequestWithPuppeteer(path, method, body) {
         const baseApiUrl = 'https://ssr-system.ct.ws';
 
         console.log('Navigating to base URL to solve security challenge...');
-        await page.goto(baseApiUrl, { waitUntil: 'networkidle0' });
+        // Changed 'networkidle0' to 'domcontentloaded' to prevent timeouts on slow networks.
+        // This is a more reliable setting for serverless environments.
+        await page.goto(baseApiUrl, { waitUntil: 'domcontentloaded' });
         console.log('Security challenge passed, cookie should be set.');
 
         if (method === 'POST') {
