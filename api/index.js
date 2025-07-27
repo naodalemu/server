@@ -21,99 +21,132 @@ async function runCorsMiddleware(req, res) {
 }
 
 async function relayRequestWithPuppeteer(path, method, body) {
-    console.log(`Relaying request: ${method} to /api/${path}`);
+    console.log(`[Proxy] Initiating relay: ${method} to /api/${path}`);
     let browser = null;
     try {
+        // STEP 1: Launch the browser with robust settings for serverless environments
+        console.log('[Proxy] Launching Chromium browser...');
         browser = await puppeteer.launch({
-            args: chromium.args,
+            args: [
+                ...chromium.args,
+                '--no-sandbox', // A required flag for running in many serverless/containerized environments
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage', // Overcomes resource limits in some environments
+                '--single-process', // Can reduce memory footprint
+            ],
             defaultViewport: chromium.defaultViewport,
             executablePath: await chromium.executablePath(),
             headless: chromium.headless,
             ignoreHTTPSErrors: true,
         });
+        console.log('[Proxy] Browser launched successfully.');
 
         const page = await browser.newPage();
         const baseApiUrl = 'https://ssr-system.ct.ws';
 
-        console.log('Navigating to base URL to solve security challenge...');
+        // STEP 2: Navigate to the base URL to establish a session and get cookies
+        console.log(`[Proxy] Navigating to ${baseApiUrl} to establish session...`);
+        try {
+            // Use 'networkidle0' to wait for network activity to cease, indicating a fully loaded page.
+            // A generous timeout is set to handle slow network conditions.
+            await page.goto(baseApiUrl, { waitUntil: 'networkidle0', timeout: 12000 });
+        } catch (navError) {
+            console.error('[Proxy] Navigation to base URL failed:', navError.message);
+            // On failure, capture a screenshot for remote debugging. This is invaluable.
+            const screenshotBuffer = await page.screenshot({ encoding: 'base64' });
+            console.log(`[Proxy] Screenshot of failure page: data:image/png;base64,${screenshotBuffer}`);
+            throw new Error(`Navigation to ${baseApiUrl} timed out or failed.`);
+        }
+        console.log('[Proxy] Navigation successful. Page content loaded.');
 
-        await page.goto(baseApiUrl, { timeout: 60000 });
-        await new Promise(resolve => setTimeout(resolve, 3000));
-
-        console.log('Security challenge passed, cookies should be set.');
-
-        // **NEW:** Get the XSRF-TOKEN from the browser's cookies
+        // Log cookies to verify that the Laravel session has been established.
         const cookies = await page.cookies();
-        const xsrfTokenCookie = cookies.find(cookie => cookie.name === 'XSRF-TOKEN');
-        const xsrfToken = xsrfTokenCookie ? decodeURIComponent(xsrfTokenCookie.value) : null;
-
-        if (xsrfToken) {
-            console.log('XSRF Token found in cookie:', xsrfToken);
-        } else {
-            console.log('WARNING: XSRF-TOKEN cookie not found.');
+        console.log('[Proxy] Cookies found after navigation:', JSON.stringify(cookies.map(c => ({ name: c.name, domain: c.domain, httpOnly: c.httpOnly })), null, 2));
+        if (!cookies.some(c => c.name.includes('session'))) {
+            console.warn('[Proxy] WARNING: A session-like cookie was not found. CSRF/Auth may fail.');
         }
 
-        // This block is still useful as a fallback for non-API form pages
-        if (method === 'POST') {
-            console.log('POST request detected. Attempting to fetch CSRF token from HTML...');
-            const csrfToken = await page.evaluate(() => {
-                const metaToken = document.querySelector('meta[name="csrf-token"]');
-                if (metaToken) return metaToken.getAttribute('content');
-                const inputToken = document.querySelector('input[name="_token"]');
-                if (inputToken) return inputToken.value;
-                return null;
-            });
-            if (csrfToken) {
-                console.log('CSRF Token found in HTML:', csrfToken);
-                body._token = csrfToken;
-            } else {
-                console.log('WARNING: No CSRF token found in HTML.');
+        let csrfToken = null;
+        // Only attempt to scrape a CSRF token for methods that require it.
+        if (includes(method)) {
+            console.log(`[Proxy] ${method} request detected. Attempting to fetch CSRF token...`);
+            try {
+                // STEP 3: Reliably scrape the CSRF token using an explicit wait, not a fixed timeout.
+                await page.waitForSelector('meta[name="csrf-token"]', { timeout: 7000 });
+                csrfToken = await page.evaluate(() => {
+                    const meta = document.querySelector('meta[name="csrf-token"]');
+                    return meta ? meta.getAttribute('content') : null;
+                });
+
+                if (csrfToken) {
+                    console.log('[Proxy] CSRF Token successfully extracted.');
+                } else {
+                    // This case handles if the meta tag exists but has no content.
+                    throw new Error('CSRF meta tag was found, but its content attribute is empty or null.');
+                }
+            } catch (tokenError) {
+                console.error('[Proxy] Critical error: Failed to find or extract CSRF token:', tokenError.message);
+                const screenshotBuffer = await page.screenshot({ encoding: 'base64' });
+                console.log(`[Proxy] Screenshot of page without CSRF token: data:image/png;base64,${screenshotBuffer}`);
+                throw new Error('Could not find the CSRF token meta tag on the page.');
             }
         }
 
+        // STEP 4: Execute the actual API request from within the browser's sandboxed context.
         const targetUrl = `${baseApiUrl}/api/${path}`;
+        console.log(`[Proxy] Executing sandboxed fetch to: ${targetUrl}`);
 
-        // **MODIFIED:** Pass the xsrfToken to page.evaluate and add it to headers
         const response = await page.evaluate(async (url, method, body, token) => {
             try {
-                const requestOptions = {
-                    method: method,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    }
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest', // Helps Laravel identify the request as AJAX.
                 };
 
-                // **NEW:** Add the X-XSRF-TOKEN header if it exists
+                // Add the CSRF token to the headers, the standard for modern APIs.
                 if (token) {
-                    requestOptions.headers = token;
+                    headers = token;
                 }
 
-                if (body && Object.keys(body).length > 0 &&.includes(method)) {
+                const requestOptions = {
+                    method: method,
+                    headers: headers,
+                };
+
+                if (body && Object.keys(body).length > 0 && includes(method)) {
                     requestOptions.body = JSON.stringify(body);
                 }
+
                 const apiResponse = await fetch(url, requestOptions);
                 const responseText = await apiResponse.text();
                 let responseData;
                 try {
+                    // Attempt to parse the response as JSON.
                     responseData = JSON.parse(responseText);
                 } catch (e) {
+                    // If parsing fails, return the raw text. This handles HTML error pages gracefully.
                     responseData = responseText;
                 }
                 return { status: apiResponse.status, data: responseData };
             } catch (error) {
-                return { status: 500, data: { message: error.message } };
+                // This captures errors within the fetch call itself (e.g., network issues inside the sandbox).
+                return { status: 500, data: { message: `page.evaluate() fetch failed: ${error.message}` } };
             }
-        }, targetUrl, method, body, xsrfToken); // Pass the token here
+        }, targetUrl, method, body, csrfToken);
 
-        console.log(`Relay successful with status: ${response.status}`);
+        console.log(`[Proxy] Relay completed with backend status: ${response.status}`);
         return response;
 
     } catch (error) {
-        console.error('An error occurred during the Puppeteer relay operation:', error);
+        console.error('[Proxy] A fatal error occurred during the Puppeteer relay operation:', error);
+        // Return a detailed error message to the client.
         return { status: 502, data: { error: true, message: `Proxy error: ${error.message}` } };
     } finally {
-        if (browser) await browser.close();
+        if (browser) {
+            await browser.close();
+            console.log('[Proxy] Puppeteer browser instance closed.');
+        }
     }
 }
 
