@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer-core';
-import chromium from '@sparticuz/chromium';
+import chromium from 'chrome-aws-lambda';
 import cors from 'cors';
 
 // Initialize cors middleware
@@ -24,11 +24,11 @@ async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
-        // This is the most robust launch configuration for Vercel.
+        // Launch configuration for chrome-aws-lambda
         browser = await puppeteer.launch({
             args: chromium.args,
             defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath(),
+            executablePath: await chromium.executablePath, // Note: property, not function call
             headless: chromium.headless,
             ignoreHTTPSErrors: true,
         });
