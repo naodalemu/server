@@ -27,9 +27,10 @@ async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
+        // --- FIX: Forcing a specific, compatible Chromium revision for Vercel ---
         browser = await puppeteer.launch({
             args: chromium.args,
-            executablePath: await chromium.executablePath(),
+            executablePath: await chromium.executablePath({ revision: '119.0.2' }),
             headless: chromium.headless,
         });
         
@@ -124,9 +125,10 @@ async function relayRequestWithPuppeteer(path, method, body) {
 }
 
 // --- Dynamic Catch-All API Route ---
-// This will be automatically picked up by the vercel.json rewrite rule.
-app.all('/api/*', async (req, res) => {
-    const path = req.params[0];
+// Changed from /api/* to /* to work correctly with Vercel's rewrites.
+app.all('/*', async (req, res) => {
+    // Vercel gives us the path directly on req.url
+    const path = req.url.substring(1); // Remove the leading '/'
     const result = await relayRequestWithPuppeteer(path, req.method, req.body);
     res.status(result.status).json(result.data);
 });
