@@ -68,7 +68,7 @@ async function relayRequestWithPuppeteer(path, method, body) {
 
         let csrfToken = null;
         // Only attempt to scrape a CSRF token for methods that require it.
-        if (includes(method)) {
+        if (.includes(method)) {
             console.log(`[Proxy] ${method} request detected. Attempting to fetch CSRF token...`);
             try {
                 // STEP 3: Reliably scrape the CSRF token using an explicit wait, not a fixed timeout.
@@ -114,7 +114,7 @@ async function relayRequestWithPuppeteer(path, method, body) {
                     headers: headers,
                 };
 
-                if (body && Object.keys(body).length > 0 && includes(method)) {
+                if (body && Object.keys(body).length > 0 &&.includes(method)) {
                     requestOptions.body = JSON.stringify(body);
                 }
 
