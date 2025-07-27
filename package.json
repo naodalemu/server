@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A proxy server to fetch data from an API protected by a browser check.",
   "main": "api/index.js",
+  "type": "module",
   "scripts": {
     "start": "node api/index.js"
   },
