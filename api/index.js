@@ -2,7 +2,7 @@ import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 import cors from 'cors';
 
-// Initialize cors middleware
+// Initialize cors middleware.
 const corsMiddleware = cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
