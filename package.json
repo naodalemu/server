@@ -9,8 +9,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@sparticuz/chromium": "123.0.1",
+    "@sparticuz/chromium": "126.0.0",
     "cors": "^2.8.5",
-    "puppeteer-core": "22.12.1"
+    "puppeteer-core": "22.13.0"
   }
 }
