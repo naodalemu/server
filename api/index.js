@@ -1,19 +1,18 @@
 // api/index.js
 
-// Import necessary libraries
-// Note: We are no longer using the 'express' library
 const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
+// Using the "-min" version is often more stable on Vercel
+const chromium = require('@sparticuz/chromium-min');
 
-// --- Main Puppeteer Logic ---
 async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
-        // Correctly launch Puppeteer without the extra object argument
+        // The new .puppeteerrc.cjs file handles all the configuration.
+        // We can now use a much simpler launch command.
         browser = await puppeteer.launch({
             args: chromium.args,
-            executablePath: await chromium.executablePath(), // <-- FIX IS HERE
+            executablePath: await chromium.executablePath(),
             headless: chromium.headless,
         });
         
@@ -37,7 +36,7 @@ async function relayRequestWithPuppeteer(path, method, body) {
                 console.log('CSRF Token found:', csrfToken);
                 body._token = csrfToken;
             } else {
-                console.log('CRITICAL WARNING: No CSRF token found on the page.');
+                console.log('WARNING: No CSRF token found on the page.');
             }
         }
 
@@ -76,29 +75,20 @@ async function relayRequestWithPuppeteer(path, method, body) {
     }
 }
 
-// --- Vercel Serverless Function Handler ---
-// This is the main entry point for all requests.
 export default async function handler(req, res) {
-    // Manually set CORS headers to allow requests from your frontend
-    res.setHeader('Access-Control-Allow-Origin', '*'); // Or your specific frontend domain
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-    // Handle preflight requests for CORS
     if (req.method === 'OPTIONS') {
         res.status(200).end();
         return;
     }
 
-    // Vercel's rewrite gives us the path like '/menuitems'. We remove the leading '/'.
     const path = req.url.substring(1);
-    
-    // Vercel automatically parses the JSON body for us
     const body = req.body;
     
-    // Call our main logic function
     const result = await relayRequestWithPuppeteer(path, req.method, body);
     
-    // Send the response back to the client
     res.status(result.status).json(result.data);
 }
