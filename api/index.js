@@ -46,19 +46,17 @@ async function relayRequestWithPuppeteer(path, method, body, headers) {
         const targetUrl = `${baseApiUrl}/api/${path}`;
         const response = await page.evaluate(async (url, method, body, authorizationHeader) => {
             try {
-                const headers = {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
+                const requestOptions = {
+                    method: method,
+                    headers: { 
+                        'Content-Type': 'application/json', 
+                        'Accept': 'application/json' 
+                    }
                 };
 
                 if (authorizationHeader) {
                     requestOptions.headers['Authorization'] = authorizationHeader;
                 }
-
-                const requestOptions = {
-                    method: method,
-                    headers: headers,
-                };
 
                 if (body && Object.keys(body).length > 0 && ['POST', 'PUT', 'PATCH'].includes(method)) {
                     requestOptions.body = JSON.stringify(body);
