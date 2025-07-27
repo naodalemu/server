@@ -20,19 +20,13 @@ async function runCorsMiddleware(req, res) {
     });
 }
 
-
 async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
+        // This is the most robust launch configuration for Vercel.
         browser = await puppeteer.launch({
-            args: [
-                ...chromium.args,
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--single-process'
-            ],
+            args: chromium.args,
             defaultViewport: chromium.defaultViewport,
             executablePath: await chromium.executablePath(),
             headless: chromium.headless,
@@ -46,7 +40,8 @@ async function relayRequestWithPuppeteer(path, method, body) {
         
         // Give the page up to 60 seconds to load to prevent timeouts
         await page.goto(baseApiUrl, { timeout: 60000 });
-        await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds for scripts
+        // Wait for a few seconds to ensure any client-side scripts have run
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
         console.log('Security challenge passed, cookie should be set.');
 
