@@ -1,26 +1,32 @@
 // api/index.js
 
 const puppeteer = require('puppeteer-core');
-// Using the "-min" version is often more stable on Vercel
-const chromium = require('@sparticuz/chromium-min');
+// Using the full chromium package for stability.
+const chromium = require('@sparticuz/chromium');
 
 async function relayRequestWithPuppeteer(path, method, body) {
     console.log(`Relaying request: ${method} to /api/${path}`);
     let browser = null;
     try {
-        // The new .puppeteerrc.cjs file handles all the configuration.
-        // We can now use a much simpler launch command.
+        // This launch configuration is the most robust for Vercel.
+        // It explicitly calls chromium.executablePath to ensure the browser
+        // is downloaded to a temporary directory if it's not already there.
         browser = await puppeteer.launch({
             args: chromium.args,
+            defaultViewport: chromium.defaultViewport,
             executablePath: await chromium.executablePath(),
             headless: chromium.headless,
+            ignoreHTTPSErrors: true,
         });
-
+        
         const page = await browser.newPage();
         const baseApiUrl = 'https://ssr-system.ct.ws';
 
         console.log('Navigating to base URL to solve security challenge...');
-        await page.goto(baseApiUrl, { waitUntil: 'networkidle0' });
+        
+        await page.goto(baseApiUrl);
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
+
         console.log('Security challenge passed, cookie should be set.');
 
         if (method === 'POST') {
@@ -84,11 +90,12 @@ export default async function handler(req, res) {
         res.status(200).end();
         return;
     }
-
-    const path = req.url.substring(1);
+    
+    // Extract the path from the request URL, removing the leading '/api/'
+    const path = req.url.startsWith('/api/') ? req.url.substring(5) : req.url.substring(1);
     const body = req.body;
-
+    
     const result = await relayRequestWithPuppeteer(path, req.method, body);
-
+    
     res.status(result.status).json(result.data);
 }
