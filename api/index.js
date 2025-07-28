@@ -43,6 +43,12 @@ async function relayRequestWithPuppeteer(path, method, body, headers) {
 
         console.log('Security challenge passed, cookie should be set.');
 
+        if (['PUT'].includes(method)) {
+            console.log(`Spoofing ${method} request as POST.`);
+            body._method = method;
+            method = 'POST';
+        }
+
         const targetUrl = `${baseApiUrl}/api/${path}`;
         const response = await page.evaluate(async (url, method, body, authorizationHeader) => {
             try {
