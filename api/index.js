@@ -5,7 +5,7 @@ import cors from 'cors';
 // Initialize cors middleware.
 const corsMiddleware = cors({
     origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Accept', 'Authorization'],
 });
 
@@ -43,7 +43,7 @@ async function relayRequestWithPuppeteer(path, method, body, headers) {
 
         console.log('Security challenge passed, cookie should be set.');
 
-        if (['PUT'].includes(method)) {
+        if (['PUT', 'PATCH'].includes(method)) {
             console.log(`Spoofing ${method} request as POST.`);
             body._method = method;
             method = 'POST';
